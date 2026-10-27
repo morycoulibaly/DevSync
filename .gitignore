@@ -8,3 +8,9 @@ backend/generated/
 !.env.example
 *.tsbuildinfo
 npm-debug.log*
+
+# Contexte local et outils de l'agent IA
+.codex/
+AGENTS.md
+PROJECT_MEMORY.md
+PROMPTS.md
