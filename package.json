@@ -1,0 +1,21 @@
+{
+  "name": "devsync",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "scripts": {
+    "dev:frontend": "npm run dev --workspace @devsync/frontend",
+    "dev:backend": "npm run start:dev --workspace @devsync/backend",
+    "prisma:generate": "npm run prisma:generate --workspace @devsync/backend",
+    "prisma:validate": "npm run prisma:validate --workspace @devsync/backend"
+  },
+  "devDependencies": {
+    "prisma": "^6.19.3"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.3"
+  }
+}

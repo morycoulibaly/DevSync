@@ -1,0 +1,189 @@
+// DevSync — schéma Prisma (MVP, webhook manuel)
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "./backend/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Utilisateurs ────────────────────────────────────────────
+
+// Authentification par GitHub OAuth : pas de mot de passe.
+model User {
+  id          String   @id @default(cuid())
+  githubId    Int      @unique
+  githubLogin String
+  name        String?
+  email       String? // peut être absent ou privé côté GitHub
+  avatarUrl   String?
+  accessToken String? // jeton OAuth GitHub, chiffré au repos
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  repositories         Repository[]
+  notificationChannels NotificationChannel[]
+  dependencyScans      DependencyScan[]
+}
+
+// ─── Dépôts suivis ───────────────────────────────────────────
+// Un dépôt = un webhook GitHub configuré à la main.
+// L'URL à coller dans GitHub contient webhookToken (ex. /webhooks/github/:webhookToken),
+// ce qui permet de retrouver le dépôt, puis de vérifier la signature HMAC
+// avec webhookSecret.
+
+model Repository {
+  id            String   @id @default(cuid())
+  userId        String
+  owner         String
+  name          String
+  fullName      String // "owner/name"
+  webhookToken  String   @unique // identifiant opaque placé dans l'URL du webhook
+  webhookSecret String // à chiffrer au repos côté application
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  // Pour une migration future vers une GitHub App :
+  // installationId Int?
+
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  events          Event[]
+  digests         Digest[]
+  dependencyScans DependencyScan[]
+
+  @@unique([userId, fullName])
+  @@index([userId])
+}
+
+// ─── Activité Git ────────────────────────────────────────────
+
+enum EventType {
+  PUSH
+  PULL_REQUEST
+  ISSUE
+  OTHER
+}
+
+enum EventStatus {
+  OPEN
+  CLOSED
+  MERGED
+}
+
+model Event {
+  id           String       @id @default(cuid())
+  repositoryId String
+  deliveryId   String       @unique // en-tête X-GitHub-Delivery : évite les doublons si GitHub rejoue
+  type         EventType
+  action       String? // opened, closed, synchronize, etc.
+  status       EventStatus? // pour PR et issues
+  actorLogin   String
+  actorAvatar  String?
+  title        String // message de commit, titre de PR ou d'issue
+  url          String?
+  payload      Json // payload brut, pour retraitement ultérieur
+  occurredAt   DateTime // date réelle de l'événement
+  receivedAt   DateTime     @default(now())
+
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  // Fil d'actualité et filtres
+  @@index([repositoryId, occurredAt(sort: Desc)])
+  @@index([repositoryId, actorLogin, occurredAt(sort: Desc)])
+  @@index([repositoryId, type, status])
+}
+
+// ─── Veille des dépendances ──────────────────────────────────
+
+enum ScanSource {
+  PASTED // package.json collé par l'utilisateur
+  REPOSITORY // lu depuis un dépôt connecté
+}
+
+enum Severity {
+  LOW
+  MODERATE
+  HIGH
+  CRITICAL
+}
+
+model DependencyScan {
+  id           String     @id @default(cuid())
+  userId       String
+  repositoryId String?
+  source       ScanSource
+  packageJson  Json
+  createdAt    DateTime   @default(now())
+
+  user       User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  repository Repository?        @relation(fields: [repositoryId], references: [id], onDelete: SetNull)
+  findings   DependencyFinding[]
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([repositoryId, createdAt(sort: Desc)])
+}
+
+model DependencyFinding {
+  id            String    @id @default(cuid())
+  scanId        String
+  packageName   String
+  currentRange  String // version déclarée (ex. "^5.2.0")
+  latestVersion String?
+  isOutdated    Boolean   @default(false)
+  severity      Severity? // null si aucune faille connue
+  advisoryId    String? // identifiant GHSA
+  advisoryUrl   String?
+  fixedVersion  String?
+
+  scan DependencyScan @relation(fields: [scanId], references: [id], onDelete: Cascade)
+
+  @@index([scanId])
+  @@index([scanId, severity])
+}
+
+// ─── Résumé quotidien ────────────────────────────────────────
+
+enum DigestStatus {
+  PENDING
+  GENERATED
+  FAILED
+}
+
+model Digest {
+  id           String       @id @default(cuid())
+  repositoryId String
+  date         DateTime     @db.Date // jour couvert par le résumé
+  summary      String?      @db.Text
+  eventCount   Int          @default(0)
+  model        String? // modèle utilisé (ex. gemini-...)
+  status       DigestStatus @default(PENDING)
+  createdAt    DateTime     @default(now())
+
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@unique([repositoryId, date]) // un seul digest par dépôt et par jour (idempotence du cron)
+}
+
+// ─── Notifications ───────────────────────────────────────────
+
+enum ChannelType {
+  DISCORD
+  SLACK
+  EMAIL
+}
+
+model NotificationChannel {
+  id        String      @id @default(cuid())
+  userId    String
+  type      ChannelType
+  target    String // URL de webhook Discord/Slack, ou adresse email
+  enabled   Boolean     @default(true)
+  createdAt DateTime    @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
