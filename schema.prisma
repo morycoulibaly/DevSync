@@ -131,6 +131,7 @@ model DependencyFinding {
   scanId        String
   packageName   String
   currentRange  String // version déclarée (ex. "^5.2.0")
+  installedVersion String?   // version exacte lue dans package-lock.json, si disponible
   latestVersion String?
   isOutdated    Boolean   @default(false)
   severity      Severity? // null si aucune faille connue

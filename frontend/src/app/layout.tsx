@@ -4,8 +4,8 @@ import { AppProviders } from "./providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "DevSync — Veille technique",
-  description: "Activité Git, dépendances et résumés quotidiens au même endroit.",
+  title: "DevSync — Tes dépôts. Tout le signal.",
+  description: "L’activité GitHub et les dépendances de tes projets réunies dans un espace clair.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

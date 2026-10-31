@@ -12,5 +12,17 @@ export function validateEnvironment(environment: Record<string, unknown>) {
     throw new Error('FRONTEND_URL must be a valid absolute URL.');
   }
 
-  return { ...environment, PORT: port, FRONTEND_URL: frontendUrl };
+  const redisPort = Number(environment.REDIS_PORT ?? 6379);
+  if (!Number.isInteger(redisPort) || redisPort < 1 || redisPort > 65535) {
+    throw new Error('REDIS_PORT must be an integer between 1 and 65535.');
+  }
+
+  return {
+    ...environment,
+    PORT: port,
+    FRONTEND_URL: frontendUrl,
+    REDIS_HOST: String(environment.REDIS_HOST ?? 'localhost'),
+    REDIS_PORT: redisPort,
+    GEMINI_MODEL: String(environment.GEMINI_MODEL ?? 'gemini-3.7-flash'),
+  };
 }

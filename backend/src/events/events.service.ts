@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '../../generated/prisma';
 import { PrismaService } from '../database/prisma.service';
 import { ListEventsDto } from './list-events.dto';
 
@@ -7,12 +8,18 @@ export class EventsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async listForUser(userId: string, filters: ListEventsDto) {
-    const where = {
+    const actorLogin = filters.actorLogin?.trim();
+    const where: Prisma.EventWhereInput = {
       // La relation garantit qu'un utilisateur ne peut voir que ses propres dépôts.
       repository: {
         userId,
         ...(filters.repositoryId ? { id: filters.repositoryId } : {}),
       },
+      ...(filters.type ? { type: filters.type } : {}),
+      ...(filters.status ? { status: filters.status } : {}),
+      ...(actorLogin
+        ? { actorLogin: { contains: actorLogin, mode: 'insensitive' } }
+        : {}),
     };
     const skip = (filters.page - 1) * filters.limit;
 

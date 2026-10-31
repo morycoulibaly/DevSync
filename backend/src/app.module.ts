@@ -8,6 +8,8 @@ import { RepositoriesModule } from './repositories/repositories.module';
 import { SecurityModule } from './security/security.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { EventsModule } from './events/events.module';
+import { DependenciesModule } from './dependencies/dependencies.module';
+import { DigestsModule } from './digests/digests.module';
 
 @Module({
   imports: [
@@ -23,6 +25,8 @@ import { EventsModule } from './events/events.module';
     HealthModule,
     WebhooksModule,
     EventsModule,
+    DependenciesModule,
+    DigestsModule,
   ],
 })
 export class AppModule {}

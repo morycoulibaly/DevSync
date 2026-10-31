@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsEnum, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { EventStatus, EventType } from '../../generated/prisma';
 
 /** Pagination simple pour parcourir les événements sans charger toute l'activité. */
 export class ListEventsDto {
@@ -19,4 +20,17 @@ export class ListEventsDto {
   @IsOptional()
   @IsString()
   repositoryId?: string;
+
+  @IsOptional()
+  @IsEnum(EventType)
+  type?: EventType;
+
+  @IsOptional()
+  @IsEnum(EventStatus)
+  status?: EventStatus;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(39)
+  actorLogin?: string;
 }

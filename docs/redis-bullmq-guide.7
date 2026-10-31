@@ -1,0 +1,71 @@
+.TH DEVSYNC-REDIS 7 "30 octobre 2026" "DevSync" "Guide technique"
+.SH NOM
+Redis et BullMQ dans DevSync — fonctionnement et parcours d’un scan
+.SH OBJECTIF
+Redis sert de stockage rapide pour les travaux en attente. BullMQ ajoute une couche de gestion : il place les jobs dans une file, suit leur état et les distribue aux workers. PostgreSQL conserve les données durables de DevSync, notamment les résultats des scans et les résumés.
+.SH PARCOURS D’UN SCAN
+.IP "1." 4
+L’utilisateur clique sur « Lancer l’analyse » dans frontend/src/app/dependencies/page.tsx. Pour une analyse collée, le navigateur envoie le package.json et le package-lock.json facultatif.
+.IP "2." 4
+frontend/src/shared/api/api-client.ts envoie un POST à NestJS. Le cookie de session accompagne la requête.
+.IP "3." 4
+backend/src/dependencies/dependencies.controller.ts protège la route avec GitHubSessionGuard. Le contrôleur récupère l’identifiant de l’utilisateur et appelle le service de file.
+.IP "4." 4
+backend/src/dependencies/dependency-scan-queue.service.ts ajoute un job dans la file dependency-scans. Le job contient l’utilisateur et soit les fichiers collés, soit le dépôt et les chemins des fichiers à analyser.
+.IP "5." 4
+L’API répond avec HTTP 202 et l’identifiant du job. 202 signifie « accepté pour traitement » : le scan n’est pas nécessairement terminé.
+.IP "6." 4
+Le worker BullMQ récupère le job. Il appelle DependenciesService, qui analyse les fichiers, interroge npm et OSV, puis sauvegarde le scan et ses résultats dans PostgreSQL.
+.IP "7." 4
+Le navigateur interroge GET /api/dependencies/scans/jobs/:jobId environ chaque seconde. Quand le job est terminé, le résultat apparaît dans la page et l’historique.
+.SH LES COMPOSANTS
+.TP
+Redis
+Un service de stockage rapide. Dans DevSync, il garde les jobs et leur état pendant leur attente et leur traitement. Il ne remplace pas PostgreSQL.
+.TP
+BullMQ
+La bibliothèque Node.js qui organise les jobs au moyen de Redis : ajout, prise en charge, état et erreurs.
+.TP
+Queue
+La file d’attente. Le code qui y ajoute un job agit comme producteur.
+.TP
+Job
+Un travail individuel et ses données. Les états courants sont waiting (en attente), active (en cours), completed (terminé) et failed (échoué).
+.TP
+Worker
+Le consommateur qui prend un job et exécute le travail métier.
+.TP
+ioredis
+Le client Node.js qui ouvre les connexions entre BullMQ et Redis.
+.SH OU SE TROUVE LE CODE
+.PP
+Le service qui crée la file, ajoute les scans et initialise le worker : backend/src/dependencies/dependency-scan-queue.service.ts.
+.PP
+Les routes protégées qui mettent le travail en file et exposent son état : backend/src/dependencies/dependencies.controller.ts.
+.PP
+Le scan métier qui lit les fichiers, demande les versions et avis puis enregistre le résultat : backend/src/dependencies/dependencies.service.ts.
+.PP
+Le polling de l’état et l’affichage du résultat : frontend/src/app/dependencies/page.tsx. Le client HTTP est frontend/src/shared/api/api-client.ts.
+.SH POURQUOI DEUX CONNEXIONS REDIS ?
+Le service crée une connexion pour l’ajout des jobs et une pour le worker. L’ajout depuis une requête HTTP doit échouer rapidement si Redis est absent : le navigateur peut afficher une erreur et permettre de réessayer. Le worker, lui, est conçu pour attendre le retour de Redis. Sa connexion utilise maxRetriesPerRequest: null, un réglage indiqué dans le guide BullMQ des connexions.
+.PP
+Le worker traite jusqu’à deux scans simultanément (concurrency: 2). À l’arrêt de NestJS, le code ferme le worker, la file et les connexions Redis.
+.SH DEUX STOCKAGES, DEUX USAGES
+Redis contient temporairement les jobs BullMQ et leurs états. Les jobs terminés restent au plus une heure (limite de 100) et les jobs échoués au plus une journée (limite de 500).
+.PP
+PostgreSQL contient l’historique métier : DependencyScan et DependencyFinding. L’expiration d’un job Redis ne supprime donc pas le résultat déjà enregistré en base.
+.SH CONFIGURATION LOCALE
+Le backend lit REDIS_HOST et REDIS_PORT. Les valeurs documentées dans .env.example sont localhost et 6379. Le service Redis doit être démarré pour que BullMQ accepte les scans.
+.PP
+Sans Redis, la file ne peut pas enregistrer le job. L’API renvoie une erreur indiquant que la file est indisponible ; elle ne prétend pas que l’analyse a commencé.
+.SH LIMITES ET SUITE
+.IP \(bu 3
+L’API et le worker tournent actuellement dans le même processus NestJS. Ils pourront être séparés pour les déployer ou les faire évoluer indépendamment.
+.IP \(bu 3
+Le navigateur utilise le polling : il redemande l’état périodiquement. Aucun WebSocket n’est utilisé.
+.IP \(bu 3
+Le Daily Digest peut réutiliser cette architecture de file et de worker.
+.SH EN BREF
+L’API reçoit et authentifie la demande. Redis conserve le job. BullMQ le distribue à un worker. Le service de scan fait le travail réel. PostgreSQL conserve les résultats. Le navigateur suit l’état avec l’identifiant renvoyé par l’API.
+.PP
+Documentation BullMQ : https://docs.bullmq.io/quick-start et https://docs.bullmq.io/guide/connections.

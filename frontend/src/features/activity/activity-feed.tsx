@@ -1,97 +1,149 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Activity, ArrowDownLeft, ArrowUpRight, CircleAlert, GitPullRequest, LoaderCircle, RotateCw } from "lucide-react";
-import { useState } from "react";
-import { apiClient, type GitEvent, type GitEventType } from "@/shared/api/api-client";
+import { useState, type FormEvent } from "react";
+import { apiClient, type GitEvent, type GitEventFilters, type GitEventStatus, type GitEventType } from "@/shared/api/api-client";
 
 const PAGE_SIZE = 20;
 
-const eventAppearance: Record<GitEventType, { label: string; Icon: typeof Activity; color: string }> = {
-  PUSH: { label: "Push", Icon: ArrowUpRight, color: "text-violet-200 bg-violet-300/10" },
-  PULL_REQUEST: { label: "Pull request", Icon: GitPullRequest, color: "text-emerald-200 bg-emerald-300/10" },
-  ISSUE: { label: "Issue", Icon: CircleAlert, color: "text-amber-100 bg-amber-300/10" },
+const eventLabels: Record<GitEventType, string> = {
+  PUSH: "Push",
+  PULL_REQUEST: "Pull request",
+  ISSUE: "Issue",
+};
+
+const statusLabels: Record<GitEventStatus, string> = {
+  OPEN: "Ouvert",
+  CLOSED: "Fermé",
+  MERGED: "Fusionné",
 };
 
 function formatDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Date inconnue";
-
-  return new Intl.DateTimeFormat("fr-FR", {
-    day: "numeric",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
+  return new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(date);
 }
 
 function EventRow({ event }: { event: GitEvent }) {
-  const appearance = eventAppearance[event.type] ?? eventAppearance.PUSH;
-  const { Icon } = appearance;
-  const eventTitle = event.url ? <a href={event.url} target="_blank" rel="noreferrer" className="font-medium text-slate-100 underline decoration-white/20 underline-offset-4 transition hover:text-indigo-200 hover:decoration-indigo-300">{event.title || "Événement GitHub"}<span className="sr-only"> (ouvre GitHub dans un nouvel onglet)</span></a> : <span className="font-medium text-slate-100">{event.title || "Événement GitHub"}</span>;
-
-  return <li className="flex gap-3 py-4 first:pt-0 last:pb-0">
-    <div className={`mt-0.5 grid size-9 shrink-0 place-items-center rounded-xl ${appearance.color}`} aria-hidden="true"><Icon size={16} /></div>
-    <div className="min-w-0 flex-1">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-400">
-        <span className="font-medium text-slate-200">{event.actorLogin || "GitHub"}</span>
-        <span aria-hidden="true">·</span><span>{appearance.label}{event.action ? ` · ${event.action}` : ""}</span>
-        {event.status && <><span aria-hidden="true">·</span><span>{event.status}</span></>}
+  return (
+    <li className="py-4 first:pt-0 last:pb-0">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        {event.url
+          ? <a href={event.url} target="_blank" rel="noreferrer" className="break-words font-medium text-emerald-950 underline decoration-emerald-900/20 underline-offset-4 hover:text-emerald-800">{event.title || "Événement GitHub"}</a>
+          : <span className="break-words font-medium text-emerald-950">{event.title || "Événement GitHub"}</span>}
+        <time className="text-xs text-emerald-950" dateTime={event.occurredAt}>{formatDate(event.occurredAt)}</time>
       </div>
-      <div className="mt-1.5 break-words text-sm leading-5">{eventTitle}</div>
-      <div className="mt-2 flex flex-wrap items-center gap-x-2 text-[11px] text-slate-500">
-        <span className="max-w-full truncate rounded-md bg-white/[0.04] px-1.5 py-0.5">{event.repositoryName}</span>
-        <span aria-hidden="true">·</span><time dateTime={event.occurredAt}>{formatDate(event.occurredAt)}</time>
-      </div>
-    </div>
-  </li>;
+      <p className="mt-1 text-sm text-emerald-950">
+        {event.repositoryName} <span className="mx-1">|</span> {event.actorLogin} <span className="mx-1">|</span>
+        {eventLabels[event.type]}{event.action ? `, ${event.action}` : ""}{event.status ? `, ${statusLabels[event.status]}` : ""}
+      </p>
+    </li>
+  );
 }
 
 export function ActivityFeed() {
   const [page, setPage] = useState(1);
+  const [draftFilters, setDraftFilters] = useState({
+    repositoryId: "",
+    type: "" as GitEventType | "",
+    status: "" as GitEventStatus | "",
+    actorLogin: "",
+  });
+  const [filters, setFilters] = useState<GitEventFilters>({});
+  const repositoriesQuery = useQuery({ queryKey: ["repositories"], queryFn: apiClient.getRepositories, retry: false });
   const eventsQuery = useQuery({
-    queryKey: ["events", page, PAGE_SIZE],
-    queryFn: () => apiClient.getEvents(page, PAGE_SIZE),
+    queryKey: ["events", page, PAGE_SIZE, filters],
+    queryFn: () => apiClient.getEvents(page, PAGE_SIZE, filters),
     retry: false,
+    // GitHub push notifications arrive asynchronously; refresh the feed without
+    // requiring the user to leave and reopen the dashboard.
+    refetchInterval: 5000,
+    refetchIntervalInBackground: false,
   });
   const totalPages = eventsQuery.data ? Math.max(1, Math.ceil(eventsQuery.data.total / PAGE_SIZE)) : 1;
+  const hasFilters = Object.values(filters).some(Boolean);
 
-  return <section aria-labelledby="activity-heading" className="rounded-2xl border border-white/[0.08] bg-[#111827]/75 p-5 sm:p-6">
-    <div className="flex items-start justify-between gap-3">
-      <div>
-        <div className="flex items-center gap-2"><span className="grid size-8 place-items-center rounded-lg bg-indigo-400/10 text-indigo-200"><Activity size={16} aria-hidden="true" /></span><h2 id="activity-heading" className="font-semibold text-white">Activité Git récente</h2></div>
-        <p className="mt-2 text-xs leading-5 text-slate-400">Les derniers événements reçus depuis tes dépôts.</p>
+  function applyFilters(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setFilters({
+      ...(draftFilters.repositoryId ? { repositoryId: draftFilters.repositoryId } : {}),
+      ...(draftFilters.type ? { type: draftFilters.type } : {}),
+      ...(draftFilters.status ? { status: draftFilters.status } : {}),
+      ...(draftFilters.actorLogin.trim() ? { actorLogin: draftFilters.actorLogin.trim() } : {}),
+    });
+    setPage(1);
+  }
+
+  function clearFilters() {
+    setDraftFilters({ repositoryId: "", type: "", status: "", actorLogin: "" });
+    setFilters({});
+    setPage(1);
+  }
+
+  return (
+    <section aria-labelledby="activity-heading" className="rounded-2xl border border-emerald-950/10 bg-white p-5 sm:p-6">
+      <div className="flex items-center justify-between gap-4">
+        <h2 id="activity-heading" className="text-lg font-semibold text-emerald-950">Activité Git</h2>
+        <button type="button" onClick={() => void eventsQuery.refetch()} disabled={eventsQuery.isFetching} className="min-h-9 rounded-lg border border-emerald-950/10 px-3 text-xs font-medium text-emerald-900 hover:bg-emerald-50 disabled:opacity-50">
+          {eventsQuery.isFetching ? "Actualisation…" : "Actualiser"}
+        </button>
       </div>
-      <button type="button" onClick={() => void eventsQuery.refetch()} disabled={eventsQuery.isFetching} aria-label="Actualiser l’activité" title="Actualiser" className="grid size-9 shrink-0 place-items-center rounded-lg border border-white/[0.08] text-slate-400 transition hover:bg-white/[0.05] hover:text-white disabled:opacity-50">
-        <RotateCw size={15} className={eventsQuery.isFetching ? "animate-spin" : ""} aria-hidden="true" />
-      </button>
-    </div>
 
-    {eventsQuery.isPending && <div role="status" className="mt-6 flex items-center justify-center gap-2 rounded-xl border border-white/[0.06] py-12 text-sm text-slate-400"><LoaderCircle size={17} className="animate-spin" aria-hidden="true" />Chargement de l’activité…</div>}
-
-    {eventsQuery.isError && <div role="alert" className="mt-6 rounded-xl border border-rose-300/15 bg-rose-300/[0.04] p-4">
-      <p className="text-sm font-medium text-rose-100">Impossible de charger l’activité.</p>
-      <p className="mt-1 text-xs leading-5 text-slate-400">{eventsQuery.error.message}</p>
-      <button type="button" onClick={() => void eventsQuery.refetch()} className="mt-3 rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-slate-200 hover:bg-white/[0.05]">Réessayer</button>
-    </div>}
-
-    {eventsQuery.isSuccess && eventsQuery.data.items.length === 0 && <div className="mt-6 flex flex-col items-center rounded-xl border border-dashed border-white/10 bg-white/[0.015] px-5 py-9 text-center">
-      <span className="grid size-11 place-items-center rounded-2xl bg-slate-800 text-slate-300"><ArrowDownLeft size={19} aria-hidden="true" /></span>
-      <p className="mt-4 text-sm font-medium text-slate-200">Aucune activité reçue</p>
-      <p className="mt-1 max-w-sm text-xs leading-5 text-slate-500">Ajoute un dépôt, puis configure son webhook dans les paramètres GitHub. Les nouveaux push, pull requests et issues apparaîtront ici.</p>
-    </div>}
-
-    {eventsQuery.isSuccess && eventsQuery.data.items.length > 0 && <>
-      <ol className="mt-5 divide-y divide-white/[0.06]" aria-label="Événements Git récents">
-        {eventsQuery.data.items.map((event) => <EventRow key={event.id} event={event} />)}
-      </ol>
-      <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.06] pt-4 text-xs text-slate-500">
-        <span>{eventsQuery.data.total} événement{eventsQuery.data.total === 1 ? "" : "s"} · page {eventsQuery.data.page} sur {totalPages}</span>
-        <div className="flex gap-2">
-          <button type="button" disabled={page <= 1 || eventsQuery.isFetching} onClick={() => setPage((current) => Math.max(1, current - 1))} className="min-h-9 rounded-lg border border-white/10 px-3 text-slate-200 hover:bg-white/[0.05] disabled:cursor-not-allowed disabled:opacity-40">Précédente</button>
-          <button type="button" disabled={page >= totalPages || eventsQuery.isFetching} onClick={() => setPage((current) => Math.min(totalPages, current + 1))} className="min-h-9 rounded-lg border border-white/10 px-3 text-slate-200 hover:bg-white/[0.05] disabled:cursor-not-allowed disabled:opacity-40">Suivante</button>
+      <form onSubmit={applyFilters} className="mt-4 grid gap-3 rounded-xl bg-emerald-50/70 p-4 sm:grid-cols-2 xl:grid-cols-4">
+        <label className="grid gap-1.5 text-xs font-medium text-emerald-900">
+          Dépôt
+          <select value={draftFilters.repositoryId} onChange={(event) => setDraftFilters((current) => ({ ...current, repositoryId: event.target.value }))} className="h-10 rounded-lg border border-emerald-950/10 bg-white px-3 text-sm outline-none focus:border-emerald-600">
+            <option value="">Tous les dépôts</option>
+            {repositoriesQuery.data?.map((repository) => <option key={repository.id} value={repository.id}>{repository.fullName}</option>)}
+          </select>
+        </label>
+        <label className="grid gap-1.5 text-xs font-medium text-emerald-900">
+          Type
+          <select value={draftFilters.type} onChange={(event) => setDraftFilters((current) => ({ ...current, type: event.target.value as GitEventType | "" }))} className="h-10 rounded-lg border border-emerald-950/10 bg-white px-3 text-sm outline-none focus:border-emerald-600">
+            <option value="">Tous les types</option>
+            <option value="PUSH">Push</option>
+            <option value="PULL_REQUEST">Pull request</option>
+            <option value="ISSUE">Issue</option>
+          </select>
+        </label>
+        <label className="grid gap-1.5 text-xs font-medium text-emerald-900">
+          Statut
+          <select value={draftFilters.status} onChange={(event) => setDraftFilters((current) => ({ ...current, status: event.target.value as GitEventStatus | "" }))} className="h-10 rounded-lg border border-emerald-950/10 bg-white px-3 text-sm outline-none focus:border-emerald-600">
+            <option value="">Tous les statuts</option>
+            <option value="OPEN">Ouvert</option>
+            <option value="CLOSED">Fermé</option>
+            <option value="MERGED">Fusionné</option>
+          </select>
+        </label>
+        <label className="grid gap-1.5 text-xs font-medium text-emerald-900">
+          Contributeur
+          <input value={draftFilters.actorLogin} onChange={(event) => setDraftFilters((current) => ({ ...current, actorLogin: event.target.value }))} placeholder="Login GitHub" className="h-10 rounded-lg border border-emerald-950/10 bg-white px-3 text-sm outline-none placeholder:text-emerald-900/50 focus:border-emerald-600" />
+        </label>
+        <div className="flex gap-2 sm:col-span-2 xl:col-span-4">
+          <button type="submit" disabled={eventsQuery.isFetching} className="min-h-9 rounded-lg bg-emerald-700 px-3 text-xs font-semibold text-white hover:bg-emerald-800 disabled:opacity-60">Appliquer</button>
+          {hasFilters && <button type="button" onClick={clearFilters} disabled={eventsQuery.isFetching} className="min-h-9 rounded-lg border border-emerald-950/10 bg-white px-3 text-xs font-medium text-emerald-900 hover:bg-emerald-950/[0.04] disabled:opacity-60">Effacer</button>}
         </div>
-      </div>
-    </>}
-  </section>;
+      </form>
+
+      {eventsQuery.isPending && <p role="status" className="py-8 text-sm">Chargement…</p>}
+      {eventsQuery.isError && <p role="alert" className="py-6 text-sm text-rose-700">Impossible de charger l’activité. {eventsQuery.error.message}</p>}
+      {eventsQuery.isSuccess && eventsQuery.data.items.length === 0 && (
+        <p className="py-8 text-sm text-emerald-950">{hasFilters ? "Aucun événement pour ces filtres." : "Aucune activité. Configure un webhook GitHub en JSON puis envoie un push."}</p>
+      )}
+      {eventsQuery.isSuccess && eventsQuery.data.items.length > 0 && (
+        <>
+          <ol className="mt-4 divide-y divide-emerald-950/10" aria-label="Événements Git">
+            {eventsQuery.data.items.map((event) => <EventRow key={event.id} event={event} />)}
+          </ol>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-emerald-950/10 pt-4 text-xs text-emerald-950">
+            <span>{eventsQuery.data.total} événement{eventsQuery.data.total === 1 ? "" : "s"} · page {eventsQuery.data.page} / {totalPages}</span>
+            <div className="flex gap-2">
+              <button type="button" disabled={page <= 1 || eventsQuery.isFetching} onClick={() => setPage((current) => Math.max(1, current - 1))} className="min-h-9 rounded-lg border border-emerald-950/10 px-3 text-emerald-950 hover:bg-emerald-50 disabled:opacity-40">Précédente</button>
+              <button type="button" disabled={page >= totalPages || eventsQuery.isFetching} onClick={() => setPage((current) => Math.min(totalPages, current + 1))} className="min-h-9 rounded-lg border border-emerald-950/10 px-3 text-emerald-950 hover:bg-emerald-50 disabled:opacity-40">Suivante</button>
+            </div>
+          </div>
+        </>
+      )}
+    </section>
+  );
 }
