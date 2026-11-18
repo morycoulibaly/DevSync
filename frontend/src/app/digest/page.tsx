@@ -10,6 +10,10 @@ function yesterdayUtcDate() {
   return date.toISOString().slice(0, 10);
 }
 
+function todayUtcDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 function formatDigestDate(value: string) {
   return new Intl.DateTimeFormat("fr-FR", { dateStyle: "full", timeZone: "UTC" }).format(new Date(value));
 }
@@ -77,7 +81,7 @@ export default function DigestPage() {
         {userQuery.isSuccess && <>
           <section className="workspace-card rounded-2xl border p-5 sm:p-6">
             <h2 className="text-lg font-bold">Créer un résumé</h2>
-            <p className="mt-2 text-sm leading-6 text-[#625d68]">Le résumé utilise les événements déjà enregistrés. Il ne peut pas inclure une activité que DevSync n’a pas reçue.</p>
+            <p className="mt-2 text-sm leading-6 text-[#625d68]">Le résumé utilise les événements déjà enregistrés. Tu peux actualiser un résumé existant ; les dates futures ne sont pas disponibles.</p>
             {repositoriesQuery.data?.length === 0 && <p className="mt-3 rounded-xl bg-violet-50 p-4 text-sm">Ajoute d’abord un dépôt suivi pour pouvoir créer un résumé.</p>}
             <form className="mt-4 grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end" onSubmit={(event) => {
               event.preventDefault();
@@ -90,10 +94,10 @@ export default function DigestPage() {
                 </select>
               </label>
               <label className="grid gap-1.5 text-sm font-medium" htmlFor="digest-date">Date du résumé
-                <input id="digest-date" type="date" required value={digestDate} onChange={(event) => setDigestDate(event.target.value)} className="workspace-input h-11 rounded-lg border px-3" />
+                <input id="digest-date" type="date" required max={todayUtcDate()} value={digestDate} onChange={(event) => setDigestDate(event.target.value)} className="workspace-input h-11 rounded-lg border px-3" />
               </label>
               <button type="submit" disabled={!selectedRepositoryId || generateMutation.isPending || Boolean(jobId)} className="workspace-primary-button min-h-11 rounded-lg px-4 text-sm font-semibold disabled:opacity-60">
-                {generateMutation.isPending || jobId ? "Génération…" : "Générer le résumé"}
+                {generateMutation.isPending || jobId ? "Génération…" : "Générer / actualiser"}
               </button>
             </form>
             {generateMutation.isError && <p role="alert" className="mt-3 text-sm text-rose-700">{generateMutation.error.message}</p>}

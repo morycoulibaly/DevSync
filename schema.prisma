@@ -180,7 +180,7 @@ model NotificationChannel {
   id        String      @id @default(cuid())
   userId    String
   type      ChannelType
-  target    String // URL de webhook Discord/Slack, ou adresse email
+  target    String // URL de webhook ou adresse email, chiffrée par l'application quand c'est un secret
   enabled   Boolean     @default(true)
   createdAt DateTime    @default(now())
 

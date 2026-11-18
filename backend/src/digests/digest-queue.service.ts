@@ -8,7 +8,7 @@ import { DigestsService } from './digests.service';
 const QUEUE_NAME = 'daily-digests';
 
 type DigestJobData =
-  | { kind: 'repository-digest'; userId: string; repositoryId: string; date: string }
+  | { kind: 'repository-digest'; userId: string; repositoryId: string; date: string; refresh: boolean }
   | { kind: 'dispatch-daily-digests' };
 
 export interface DigestJobResult {
@@ -69,14 +69,20 @@ export class DigestQueueService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async enqueueRepositoryDigest(userId: string, repositoryId: string, date: string): Promise<DigestJobAccepted> {
+  async enqueueRepositoryDigest(
+    userId: string,
+    repositoryId: string,
+    date: string,
+    refresh = false,
+  ): Promise<DigestJobAccepted> {
     await this.digests.validateRepositoryAccess(userId, repositoryId);
+    this.digests.validateRequestedDate(date);
     const jobId = `digest-${repositoryId}-${date}`;
     try {
       const existingJob = await this.queue.getJob(jobId);
       if (existingJob) {
         const state = await existingJob.getState();
-        if (state !== 'failed') return { id: jobId };
+        if (state !== 'failed' && state !== 'completed') return { id: jobId };
         await existingJob.remove();
       }
       await this.queue.add('generate-repository-digest', {
@@ -84,6 +90,7 @@ export class DigestQueueService implements OnModuleInit, OnModuleDestroy {
         userId,
         repositoryId,
         date,
+        refresh,
       }, {
         jobId,
         attempts: 3,
@@ -140,6 +147,7 @@ export class DigestQueueService implements OnModuleInit, OnModuleDestroy {
       job.data.userId,
       job.data.repositoryId,
       job.data.date,
+      job.data.refresh,
     );
     return { digestIds: [digest.id] };
   }

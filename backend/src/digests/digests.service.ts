@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DigestStatus } from '../../generated/prisma';
 import { PrismaService } from '../database/prisma.service';
@@ -16,6 +16,8 @@ interface GeminiInteractionResponse {
 
 @Injectable()
 export class DigestsService {
+  private readonly logger = new Logger(DigestsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
@@ -27,6 +29,16 @@ export class DigestsService {
       select: { id: true },
     });
     if (!repository) throw new NotFoundException('Dépôt suivi introuvable.');
+  }
+
+  validateRequestedDate(requestedDate: string) {
+    const date = parseUtcDate(requestedDate);
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    if (date > today) {
+      throw new BadRequestException('La date du résumé ne peut pas être dans le futur.');
+    }
+    return date;
   }
 
   async listForUser(userId: string) {
@@ -48,18 +60,18 @@ export class DigestsService {
     });
   }
 
-  async generateForRepository(userId: string, repositoryId: string, requestedDate: string) {
+  async generateForRepository(userId: string, repositoryId: string, requestedDate: string, refresh = false) {
     const repository = await this.prisma.repository.findFirst({
       where: { id: repositoryId, userId, isActive: true },
       select: { id: true, fullName: true },
     });
     if (!repository) throw new NotFoundException('Dépôt suivi introuvable.');
 
-    const date = parseUtcDate(requestedDate);
+    const date = this.validateRequestedDate(requestedDate);
     const existing = await this.prisma.digest.findUnique({
       where: { repositoryId_date: { repositoryId, date } },
     });
-    if (existing?.status === DigestStatus.GENERATED) return existing;
+    if (!refresh && existing?.status === DigestStatus.GENERATED) return existing;
 
     const digest = await this.prisma.digest.upsert({
       where: { repositoryId_date: { repositoryId, date } },
@@ -176,8 +188,9 @@ export class DigestsService {
       throw new ServiceUnavailableException('Gemini ne répond pas. Le Daily Digest pourra être relancé plus tard.');
     }
     if (!response.ok) {
-      // Ne jamais inclure le corps distant ou la clé dans une erreur renvoyée au navigateur.
-      throw new ServiceUnavailableException('Gemini a refusé la génération du résumé. Vérifie la clé, le modèle et les quotas.');
+      // Le code HTTP suffit au diagnostic. Ne jamais journaliser le corps distant ni la clé.
+      this.logger.warn(`Gemini a refusé une génération (HTTP ${response.status}).`);
+      throw new ServiceUnavailableException(geminiErrorMessage(response.status));
     }
 
     const result = await response.json() as GeminiInteractionResponse;
@@ -193,6 +206,17 @@ export class DigestsService {
     }
     return summary;
   }
+}
+
+function geminiErrorMessage(status: number) {
+  if (status === 400) return 'Gemini a rejeté la requête (HTTP 400). Vérifie le modèle et la configuration.';
+  if (status === 401) return 'La clé Gemini est invalide ou inactive. Vérifie son état dans Google AI Studio.';
+  if (status === 402) return 'Le compte Gemini doit être régularisé avant de générer un résumé.';
+  if (status === 403) return 'Le projet associé à la clé n’a pas accès à Gemini. Vérifie son accès dans Google AI Studio.';
+  if (status === 404) return 'Le modèle Gemini configuré est introuvable. Vérifie GEMINI_MODEL.';
+  if (status === 429) return 'La limite ou le quota Gemini est atteint. Vérifie les quotas, puis réessaie plus tard.';
+  if (status >= 500) return `Gemini rencontre un problème temporaire (HTTP ${status}). Réessaie plus tard.`;
+  return `Gemini a refusé la génération (HTTP ${status}). Vérifie la configuration de l’API.`;
 }
 
 function parseUtcDate(value: string) {

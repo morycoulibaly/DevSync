@@ -26,7 +26,7 @@ export class DigestsController {
   @HttpCode(HttpStatus.ACCEPTED)
   generate(@Req() request: AuthenticatedRequest, @Body() body: GenerateDigestDto) {
     const date = body.date ?? yesterdayUtcDate();
-    return this.queue.enqueueRepositoryDigest(request.devsyncUser.id, body.repositoryId, date);
+    return this.queue.enqueueRepositoryDigest(request.devsyncUser.id, body.repositoryId, date, true);
   }
 
   @Get('jobs/:jobId')

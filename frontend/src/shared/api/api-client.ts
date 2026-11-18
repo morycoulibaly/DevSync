@@ -92,6 +92,13 @@ export interface DailyDigest {
   createdAt: string;
 }
 
+export interface NotificationChannel {
+  id: string;
+  type: "DISCORD";
+  enabled: boolean;
+  createdAt: string;
+}
+
 export interface DigestJobStatus {
   id: string;
   state: string;
@@ -162,6 +169,17 @@ export const apiClient = {
     }),
   getDigestJob: (jobId: string) =>
     request<DigestJobStatus>(`/digests/jobs/${encodeURIComponent(jobId)}`),
+  getNotificationChannels: () => request<NotificationChannel[]>("/notifications/channels"),
+  createDiscordChannel: (target: string) => request<NotificationChannel>("/notifications/channels", {
+    method: "POST",
+    body: JSON.stringify({ target }),
+  }),
+  updateNotificationChannel: (channelId: string, enabled: boolean) => request<NotificationChannel>(`/notifications/channels/${encodeURIComponent(channelId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ enabled }),
+  }),
+  deleteNotificationChannel: (channelId: string) => request<void>(`/notifications/channels/${encodeURIComponent(channelId)}`, { method: "DELETE" }),
+  testNotificationChannel: (channelId: string) => request<{ sent: boolean }>(`/notifications/channels/${encodeURIComponent(channelId)}/test`, { method: "POST" }),
   createRepository: (repository: { owner: string; name: string }) =>
     request<NewRepository>("/repositories", {
       method: "POST",

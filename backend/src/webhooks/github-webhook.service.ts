@@ -9,6 +9,7 @@ import {
 import { EventStatus, EventType, Prisma } from '../../generated/prisma';
 import { PrismaService } from '../database/prisma.service';
 import { SecretCryptoService } from '../security/secret-crypto.service';
+import { NotificationQueueService } from '../notifications/notification-queue.service';
 
 interface IncomingWebhook {
   webhookToken: string;
@@ -36,6 +37,7 @@ export class GitHubWebhookService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly secretCrypto: SecretCryptoService,
+    private readonly notificationQueue: NotificationQueueService,
   ) {}
 
   async process(webhook: IncomingWebhook) {
@@ -62,7 +64,7 @@ export class GitHubWebhookService {
     if (!event) return { received: true, stored: false, reason: 'unsupported_event' };
 
     try {
-      await this.prisma.event.create({
+      const createdEvent = await this.prisma.event.create({
         data: {
           repositoryId: repository.id,
           deliveryId: webhook.deliveryId,
@@ -70,6 +72,7 @@ export class GitHubWebhookService {
           payload: payload as Prisma.InputJsonValue,
         },
       });
+      await this.notificationQueue.enqueueEvent(createdEvent.id);
       return { received: true, stored: true };
     } catch (error) {
       // GitHub peut renvoyer la même livraison après un timeout. La contrainte
@@ -78,6 +81,13 @@ export class GitHubWebhookService {
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2002'
       ) {
+        // En cas de panne Redis au premier essai, GitHub rejoue la livraison.
+        // On retrouve alors l’événement existant et on retente son ajout à la file.
+        const existingEvent = await this.prisma.event.findUnique({
+          where: { deliveryId: webhook.deliveryId },
+          select: { id: true },
+        });
+        if (existingEvent) await this.notificationQueue.enqueueEvent(existingEvent.id);
         return { received: true, stored: false, reason: 'duplicate_delivery' };
       }
       throw error;

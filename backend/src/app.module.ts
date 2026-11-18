@@ -10,6 +10,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
 import { EventsModule } from './events/events.module';
 import { DependenciesModule } from './dependencies/dependencies.module';
 import { DigestsModule } from './digests/digests.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { DigestsModule } from './digests/digests.module';
     EventsModule,
     DependenciesModule,
     DigestsModule,
+    NotificationsModule,
   ],
 })
 export class AppModule {}
